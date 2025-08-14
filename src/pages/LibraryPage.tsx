@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react'
 import { Card } from '../components/ui/card'
 import { Input } from '../components/ui/input'
 import { Button } from '../components/ui/button'
-import { Search, Calendar, Tag, FileText, Mail, Clock, ArrowRight } from 'lucide-react'
+import { Search, Calendar, Tag, FileText, Mail, Clock, ArrowRight, Loader2, CheckCircle, Download } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface Newsletter {
@@ -13,10 +13,17 @@ interface Newsletter {
   file_content: string
 }
 
+interface ProcessingState {
+  [key: string]: 'idle' | 'processing' | 'success' | 'error'
+}
+
 export function LibraryPage() {
   const [newsletters, setNewsletters] = useState<Newsletter[]>([])
   const [loading, setLoading] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
+  const [processingState, setProcessingState] = useState<ProcessingState>({})
+  const [processedDigests, setProcessedDigests] = useState<{[key: string]: any}>({})
+  const [digestCount, setDigestCount] = useState(0)
 
   useEffect(() => {
     fetchNewsletters()
@@ -31,6 +38,14 @@ export function LibraryPage() {
 
       if (error) throw error
       setNewsletters(data || [])
+      
+      // Fetch digest count
+      const { count } = await supabase
+        .from('digests')
+        .select('*', { count: 'exact', head: true })
+      
+      setDigestCount(count || 0)
+      
     } catch (error) {
       console.error('Error fetching newsletters:', error)
     } finally {
@@ -57,10 +72,103 @@ export function LibraryPage() {
     return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
   }
 
-  const handleProcessNewsletter = (newsletterId: string) => {
-    // TODO: Implement processing logic
-    console.log('Processing newsletter:', newsletterId)
-    // This will eventually trigger AI processing and create digest entries
+  const handleProcessNewsletter = async (newsletterId: string) => {
+    setProcessingState(prev => ({ ...prev, [newsletterId]: 'processing' }))
+    
+    try {
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-newsletter`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ newsletterId })
+      })
+
+      if (!response.ok) {
+        throw new Error('Processing failed')
+      }
+
+      const result = await response.json()
+      
+      setProcessingState(prev => ({ ...prev, [newsletterId]: 'success' }))
+      setProcessedDigests(prev => ({ ...prev, [newsletterId]: result }))
+      setDigestCount(prev => prev + 1)
+      
+    } catch (error) {
+      console.error('Processing error:', error)
+      setProcessingState(prev => ({ ...prev, [newsletterId]: 'error' }))
+    }
+  }
+
+  const handleDownloadDigest = (newsletterId: string) => {
+    const digest = processedDigests[newsletterId]
+    if (!digest) return
+
+    const newsletter = newsletters.find(n => n.id === newsletterId)
+    const filename = newsletter ? newsletter.filename.replace('.eml', '_digest.md') : 'digest.md'
+    
+    const blob = new Blob([digest.markdown], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const getProcessingButton = (newsletterId: string) => {
+    const state = processingState[newsletterId] || 'idle'
+    
+    switch (state) {
+      case 'processing':
+        return (
+          <Button variant="outline" size="sm" disabled>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            Processing...
+          </Button>
+        )
+      case 'success':
+        return (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="text-green-600">
+              <CheckCircle className="h-4 w-4 mr-2" />
+              Processed
+            </Button>
+            <Button 
+              size="sm" 
+              onClick={() => handleDownloadDigest(newsletterId)}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download
+            </Button>
+          </div>
+        )
+      case 'error':
+        return (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => handleProcessNewsletter(newsletterId)}
+            className="text-red-600"
+          >
+            Retry Processing
+          </Button>
+        )
+      default:
+        return (
+          <Button 
+            variant="outline" 
+            size="sm"
+            onClick={() => handleProcessNewsletter(newsletterId)}
+          >
+            Process with AI
+            <ArrowRight className="h-4 w-4 ml-2" />
+          </Button>
+        )
+    }
   }
 
   if (loading) {
@@ -158,14 +266,7 @@ export function LibraryPage() {
                 </div>
                 
                 <div className="flex items-center gap-3">
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => handleProcessNewsletter(newsletter.id)}
-                  >
-                    Process with AI
-                    <ArrowRight className="h-4 w-4 ml-2" />
-                  </Button>
+                  {getProcessingButton(newsletter.id)}
                 </div>
               </div>
             </Card>
@@ -181,7 +282,7 @@ export function LibraryPage() {
             <div className="text-sm text-gray-600">Total Newsletters</div>
           </Card>
           <Card className="p-4 text-center">
-            <div className="text-2xl font-bold text-green-600">0</div>
+            <div className="text-2xl font-bold text-green-600">{digestCount}</div>
             <div className="text-sm text-gray-600">Processed Digests</div>
           </Card>
           <Card className="p-4 text-center">
