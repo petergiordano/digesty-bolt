@@ -14,7 +14,10 @@ interface Newsletter {
 }
 
 interface ProcessingState {
-  [key: string]: 'idle' | 'processing' | 'success' | 'error'
+  [key: string]: {
+    status: 'idle' | 'processing' | 'success' | 'error'
+    message?: string
+  }
 }
 
 export function LibraryPage() {
@@ -73,7 +76,7 @@ export function LibraryPage() {
   }
 
   const handleProcessNewsletter = async (newsletterId: string) => {
-    setProcessingState(prev => ({ ...prev, [newsletterId]: 'processing' }))
+    setProcessingState(prev => ({ ...prev, [newsletterId]: { status: 'processing' } }))
     
     try {
       const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/process-newsletter`, {
@@ -86,18 +89,26 @@ export function LibraryPage() {
       })
 
       if (!response.ok) {
-        throw new Error('Processing failed')
+        const errorData = await response.json()
+        const errorMessage = errorData.details || errorData.error || 'Processing failed'
+        throw new Error(errorMessage)
       }
 
       const result = await response.json()
       
-      setProcessingState(prev => ({ ...prev, [newsletterId]: 'success' }))
+      setProcessingState(prev => ({ ...prev, [newsletterId]: { status: 'success' } }))
       setProcessedDigests(prev => ({ ...prev, [newsletterId]: result }))
       setDigestCount(prev => prev + 1)
       
     } catch (error) {
       console.error('Processing error:', error)
-      setProcessingState(prev => ({ ...prev, [newsletterId]: 'error' }))
+      setProcessingState(prev => ({ 
+        ...prev, 
+        [newsletterId]: { 
+          status: 'error', 
+          message: error instanceof Error ? error.message : 'Processing failed' 
+        } 
+      }))
     }
   }
 
@@ -120,9 +131,9 @@ export function LibraryPage() {
   }
 
   const getProcessingButton = (newsletterId: string) => {
-    const state = processingState[newsletterId] || 'idle'
+    const state = processingState[newsletterId] || { status: 'idle' }
     
-    switch (state) {
+    switch (state.status) {
       case 'processing':
         return (
           <Button variant="outline" size="sm" disabled>
@@ -148,14 +159,21 @@ export function LibraryPage() {
         )
       case 'error':
         return (
-          <Button 
-            variant="outline" 
-            size="sm" 
-            onClick={() => handleProcessNewsletter(newsletterId)}
-            className="text-red-600"
-          >
-            Retry Processing
-          </Button>
+          <div className="flex flex-col gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => handleProcessNewsletter(newsletterId)}
+              className="text-red-600"
+            >
+              Retry Processing
+            </Button>
+            {state.message && (
+              <div className="text-xs text-red-600 max-w-xs">
+                {state.message}
+              </div>
+            )}
+          </div>
         )
       default:
         return (
