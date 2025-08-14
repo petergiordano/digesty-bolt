@@ -50,11 +50,17 @@ serve(async (req) => {
     const newsletter = newsletters[0]
     
     // Extract text content from .eml file
-    const emailContent = extractTextFromEml(newsletter.file_content)
+    let emailContent = extractTextFromEml(newsletter.file_content)
+    
+    // Truncate content to fit within token limits (leaving room for prompt)
+    if (emailContent.length > 10000) {
+      emailContent = emailContent.substring(0, 10000) + '\n\n[Content truncated due to length...]'
+    }
     
     // Generate AI digest using OpenAI
     const openaiApiKey = Deno.env.get('OPENAI_API_KEY')
     if (!openaiApiKey) {
+      console.error('OpenAI API key not found in environment variables')
       return new Response(
         JSON.stringify({ error: 'OpenAI API key not configured' }),
         { 
@@ -63,6 +69,8 @@ serve(async (req) => {
         }
       )
     }
+    
+    console.log('Processing newsletter:', newsletter.filename, 'Content length:', emailContent.length)
 
     const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -125,8 +133,13 @@ Focus on extracting valuable insights, identifying patterns, and presenting info
     if (!aiResponse.ok) {
       const error = await aiResponse.text()
       console.error('OpenAI API error:', error)
+      console.error('OpenAI API status:', aiResponse.status)
       return new Response(
-        JSON.stringify({ error: 'AI processing failed' }),
+        JSON.stringify({ 
+          error: 'AI processing failed', 
+          details: `OpenAI API returned ${aiResponse.status}`,
+          apiError: error
+        }),
         { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
@@ -162,8 +175,13 @@ Focus on extracting valuable insights, identifying patterns, and presenting info
     if (!digestResponse.ok) {
       const error = await digestResponse.text()
       console.error('Database error:', error)
+      console.error('Database response status:', digestResponse.status)
       return new Response(
-        JSON.stringify({ error: 'Failed to save digest' }),
+        JSON.stringify({ 
+          error: 'Failed to save digest',
+          details: `Database returned ${digestResponse.status}`,
+          dbError: error
+        }),
         { 
           status: 500, 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
