@@ -285,6 +285,21 @@ export function LibraryPage() {
                 
                 <div className="flex items-center gap-3">
                   {getProcessingButton(newsletter.id)}
+                  {/* Add View Digest button for processed newsletters */}
+                  {processingState[newsletter.id]?.status === 'success' && (
+                    <Button 
+                      size="sm"
+                      onClick={() => {
+                        // Find the digest ID from processed digests
+                        const digest = processedDigests[newsletter.id]
+                        if (digest?.digest?.id) {
+                          window.location.hash = `/digest/${digest.digest.id}`
+                        }
+                      }}
+                    >
+                      View Digest
+                    </Button>
+                  )}
                 </div>
               </div>
             </Card>

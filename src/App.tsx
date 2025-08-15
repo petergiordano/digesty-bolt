@@ -17,9 +17,11 @@ function App() {
         return <LibraryPage />;
       case '/upload':
         return <UploadPage />;
-      case '/digest':
-        return <DigestPage />;
       default:
+        if (hash.startsWith('/digest/')) {
+          const digestId = hash.split('/digest/')[1];
+          return <DigestPage digestId={digestId} />;
+        }
         return <HomePage />;
     }
   };
